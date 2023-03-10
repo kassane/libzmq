@@ -2,7 +2,7 @@ name: Fuzzers
 on:
   push:
     branches:
-      - master
+      - zig-pkg
   pull_request:
     paths:
       - '.github/workflows/Fuzzers.yaml'
