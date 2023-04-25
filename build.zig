@@ -153,7 +153,7 @@ pub fn build(b: *Builder) void {
     // https://github.com/ziglang/zig/issues/4785 - drop replacement for MSVC
     libzmq.linkLibCpp(); // LLVM libc++ (builtin)
     libzmq.linkLibC(); // OS libc
-    libzmq.install();
+    b.installArtifact(libzmq);
     libzmq.installHeadersDirectory("include", "");
 
     if (perf) {
@@ -222,9 +222,9 @@ fn buildSample(b: *std.Build.Builder, lib: pkgBuilder, name: []const u8, file: [
     if (lib.target.isWindows())
         test_exe.linkSystemLibraryName("ws2_32");
     test_exe.linkLibCpp();
-    test_exe.install();
+    b.installArtifact(test_exe);
 
-    const run_cmd = test_exe.run();
+    const run_cmd = b.addRunArtifact(test_exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
