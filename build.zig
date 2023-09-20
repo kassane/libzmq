@@ -1,7 +1,7 @@
 //! Requires zig version: 0.11 or higher
-/// build: zig build -Doptimize=ReleaseFast -Dshared (or -Dshared=true/false)
+/// build: zig build -Doptimize=ReleaseFast -DShared (or -DShared=true/false)
 const std = @import("std");
-const Builder = std.Build.Builder;
+const Builder = std.Build;
 
 const pkgBuilder = struct {
     mode: std.builtin.OptimizeMode,
@@ -15,8 +15,8 @@ pub fn build(b: *Builder) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Option - static library [default]
-    const shared = b.option(bool, "shared", "Build the Shared Library [default: false]") orelse false;
-    const perf = b.option(bool, "perf", "Build perf-tools [default: false]") orelse false;
+    const shared = b.option(bool, "Shared", "Build the Shared Library [default: false]") orelse false;
+    const perf = b.option(bool, "Perf", "Build perf-tools [default: false]") orelse false;
 
     // Generating "platform.hpp"
     const config_header = switch (target.getOsTag()) {
@@ -118,10 +118,10 @@ pub fn build(b: *Builder) void {
 
     libzmq.strip = true;
     libzmq.addConfigHeader(config_header);
-    libzmq.addIncludePath("include");
-    libzmq.addIncludePath("src");
-    libzmq.addIncludePath("external");
-    libzmq.addIncludePath(config_header.include_path);
+    libzmq.addIncludePath(.{ .path = "include" });
+    libzmq.addIncludePath(.{ .path = "src" });
+    libzmq.addIncludePath(.{ .path = "external" });
+    libzmq.addIncludePath(.{ .path = config_header.include_path });
     libzmq.addCSourceFiles(switch (target.getOsTag()) {
         .windows => cxxSources ++ [_][]const u8{"src/select.cpp"},
         .macos => cxxSources ++ [_][]const u8{"src/kqeue.cpp"},
@@ -131,7 +131,7 @@ pub fn build(b: *Builder) void {
     libzmq.addCSourceFiles(extraCsources, cFlags);
 
     if (target.isWindows()) {
-        libzmq.addCSourceFile("external/wepoll/wepoll.c", cFlags);
+        libzmq.addCSourceFile(.{ .file = .{ .path = "external/wepoll/wepoll.c" }, .flags = cFlags });
         // no pkg-config
         libzmq.linkSystemLibraryName("ws2_32");
         libzmq.linkSystemLibraryName("rpcrt4");
@@ -216,9 +216,9 @@ fn buildSample(b: *std.Build.Builder, lib: pkgBuilder, name: []const u8, file: [
     });
     test_exe.linkLibrary(lib.build);
     test_exe.addConfigHeader(lib.configH);
-    test_exe.addIncludePath(lib.configH.include_path);
-    test_exe.addSystemIncludePath("src");
-    test_exe.addCSourceFile(file, cFlags);
+    test_exe.addIncludePath(.{ .path = lib.configH.include_path });
+    test_exe.addSystemIncludePath(.{ .path = "src" });
+    test_exe.addCSourceFile(.{ .file = .{ .path = file }, .flags = cFlags });
     if (lib.target.isWindows())
         test_exe.linkSystemLibraryName("ws2_32");
     test_exe.linkLibCpp();
@@ -235,7 +235,6 @@ fn buildSample(b: *std.Build.Builder, lib: pkgBuilder, name: []const u8, file: [
 }
 
 const cFlags: []const []const u8 = &.{
-    "-O3",
     "-Wall",
     "-pedantic",
     "-Wno-long-long",
