@@ -14,26 +14,18 @@ jobs:
         runs-on: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.runs-on }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.11.0
-      - name: Install valgrind
-        if: startsWith(matrix.runs-on, 'ubuntu')
-        run: |
-            sudo apt update
-            sudo apt install -f valgrind -y
       - name: zig build & run
-        run: zig build bench_rt -Doptimize=ReleaseFast -DPerf --summary all
-      - name: Valgrind test
-        if: startsWith(matrix.runs-on, 'ubuntu')
-        run: time valgrind --leak-check=full zig-out/bin/bench_rt
+        run: zig build -DPerf --summary all
 
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.11.0

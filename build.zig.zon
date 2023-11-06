@@ -2,5 +2,10 @@
     .name = "libzmq",
     .version = "4.3.5",
 
-    .dependencies = .{},
+    .dependencies = .{
+        .winpthreads = .{
+            .url = "https://github.com/kassane/winpthreads-zigbuild/archive/d9e249bc126d49d3f3b513525362e664e6efc889.tar.gz",
+            .hash = "12206485bb32bb6b25a554a1d3ccdf479f3e8d3c7b39500480c300892a4c0390fb58",
+        },
+    },
 }

@@ -27,8 +27,7 @@ pub fn build(b: *Builder) void {
             .ZMQ_HAVE_LINUX = {},
             .ZMQ_HAVE_PPOLL = {},
             .ZMQ_USE_EPOLL = {},
-            .ZMQ_HAVE_CURVE = {},
-            .ZMQ_USE_TWEETNACL = {},
+            .ZMQ_HAVE_CURVE = null,
             .ZMQ_HAVE_EVENTFD = {},
             .ZMQ_HAVE_IFADDRS = {},
             .ZMQ_HAVE_NOEXCEPT = {},
@@ -54,7 +53,7 @@ pub fn build(b: *Builder) void {
             .ZMQ_USE_CV_IMPL_STL11 = {},
             .ZMQ_HAVE_IPC = {},
             .ZMQ_POLL_BASED_ON_POLL = {},
-            .ZMQ_CACHELINE_SIZE = 64,
+            .ZMQ_CACHELINE_SIZE = std.atomic.cache_line,
             .ZMQ_USE_RADIX_TREE = {},
         }),
         .windows => b.addConfigHeader(.{
@@ -63,8 +62,7 @@ pub fn build(b: *Builder) void {
         }, .{
             .ZMQ_HAVE_WINDOWS = {},
             .ZMQ_HAVE_MINGW32 = {},
-            .ZMQ_HAVE_CURVE = {},
-            .ZMQ_USE_TWEETNACL = {},
+            .ZMQ_HAVE_CURVE = null,
             .ZMQ_USE_SELECT = {},
             .ZMQ_USE_CV_IMPL_STL11 = {},
             .ZMQ_CACHELINE_SIZE = std.atomic.cache_line,
@@ -82,8 +80,7 @@ pub fn build(b: *Builder) void {
             .ZMQ_USE_KQUEUE = {},
             .ZMQ_POSIX_MEMALIGN = 1,
             .ZMQ_CACHELINE_SIZE = std.atomic.cache_line,
-            .ZMQ_HAVE_CURVE = {},
-            .ZMQ_USE_TWEETNACL = {},
+            .ZMQ_HAVE_CURVE = null,
             .ZMQ_HAVE_UIO = {},
             .ZMQ_HAVE_IFADDRS = {},
             .ZMQ_HAVE_OS_KEEPALIVE = {},
@@ -91,9 +88,11 @@ pub fn build(b: *Builder) void {
             .ZMQ_HAVE_TCP_KEEPCNT = {},
             .ZMQ_HAVE_TCP_KEEPINTVL = {},
             .ZMQ_USE_BUILTIN_SHA1 = {},
-            .ZMQ_IOTHREAD_POLLER_USE_KQEUE = {},
+            .ZMQ_IOTHREAD_POLLER_USE_KQUEUE = {},
             .ZMQ_USE_CV_IMPL_STL11 = {},
+            .ZMQ_POLL_BASED_ON_POLL = {},
             .HAVE_STRNLEN = {},
+            .ZMQ_HAVE_STRLCPY = {},
             .HAVE_FORK = {},
         }),
         else => b.addConfigHeader(.{}, .{}),
@@ -122,37 +121,49 @@ pub fn build(b: *Builder) void {
     libzmq.addIncludePath(.{ .path = "src" });
     libzmq.addIncludePath(.{ .path = "external" });
     libzmq.addIncludePath(.{ .path = config_header.include_path });
-    libzmq.addCSourceFiles(switch (target.getOsTag()) {
-        .windows => cxxSources ++ [_][]const u8{"src/select.cpp"},
-        .macos => cxxSources ++ [_][]const u8{"src/kqeue.cpp"},
-        .linux => cxxSources ++ [_][]const u8{"src/epoll.cpp"},
-        else => cxxSources,
-    }, cxxFlags);
-    libzmq.addCSourceFiles(extraCsources, cFlags);
 
     if (target.isWindows()) {
+        libzmq.defineCMacro("ZMQ_STATIC", null);
+        // libzmq.defineCMacro("ZMQ_WIN32_WINNT", "0x0601");
+        // libzmq.defineCMacro("DLL_EXPORT", null);
         libzmq.addCSourceFile(.{ .file = .{ .path = "external/wepoll/wepoll.c" }, .flags = cFlags });
-        // no pkg-config
-        libzmq.linkSystemLibraryName("ws2_32");
-        libzmq.linkSystemLibraryName("rpcrt4");
-        libzmq.linkSystemLibraryName("iphlpapi");
+        libzmq.linkSystemLibrary("ws2_32");
+        libzmq.linkSystemLibrary("rpcrt4");
+        libzmq.linkSystemLibrary("iphlpapi");
         // MinGW
         if (target.getAbi() == .gnu) {
             // Need winpthread header & lib (zig has not included)
-            libzmq.linkSystemLibraryName("pthread.dll"); // pthread.dll.a (pthread.a get link error)
+            const winpthreads_dep = b.dependency("winpthreads", .{
+                .optimize = optimize,
+                .target = target,
+            });
+            libzmq.defineCMacro("_GNU_SOURCE", null);
+            const winpthreads = winpthreads_dep.artifact("winpthreads");
+            for (winpthreads.include_dirs.items) |inc| {
+                libzmq.include_dirs.append(inc) catch {};
+            }
+            libzmq.linkLibrary(winpthreads);
         }
     } else if (target.isDarwin()) {
-        // TODO
-        //libzmq.linkFramework("");
+        libzmq.defineCMacro("_DARWIN_C_SOURCE", null);
     } else {
         // Linux
         libzmq.linkSystemLibrary("rt");
         libzmq.linkSystemLibrary("dl");
     }
+    libzmq.addCSourceFiles(switch (target.getOsTag()) {
+        .windows => cxxSources ++ [_][]const u8{"src/select.cpp"},
+        .macos => cxxSources ++ [_][]const u8{"src/kqueue.cpp"},
+        .linux => cxxSources ++ [_][]const u8{"src/epoll.cpp"},
+        else => cxxSources,
+    }, cxxFlags);
+    libzmq.addCSourceFiles(extraCsources, cFlags);
     // TODO: MSVC support libC++ (need: ucrt/msvcrt/vcruntime)
     // https://github.com/ziglang/zig/issues/4785 - drop replacement for MSVC
-    libzmq.linkLibCpp(); // LLVM libc++ (builtin)
-    libzmq.linkLibC(); // OS libc
+    if (target.getAbi() != .msvc)
+        libzmq.linkLibCpp() // LLVM libc++ (builtin)
+    else
+        libzmq.linkLibC();
     b.installArtifact(libzmq);
     libzmq.installHeadersDirectory("include", "");
 
@@ -214,14 +225,22 @@ fn buildSample(b: *std.Build.Builder, lib: pkgBuilder, name: []const u8, file: [
         .optimize = lib.mode,
         .target = lib.target,
     });
-    test_exe.linkLibrary(lib.build);
     test_exe.addConfigHeader(lib.configH);
     test_exe.addIncludePath(.{ .path = lib.configH.include_path });
     test_exe.addSystemIncludePath(.{ .path = "src" });
     test_exe.addCSourceFile(.{ .file = .{ .path = file }, .flags = cFlags });
-    if (lib.target.isWindows())
-        test_exe.linkSystemLibraryName("ws2_32");
-    test_exe.linkLibCpp();
+    if (lib.target.isWindows()) {
+        test_exe.want_lto = false;
+        test_exe.defineCMacro("ZMQ_STATIC", null);
+        test_exe.linkSystemLibrary("ws2_32");
+        test_exe.linkSystemLibrary("rpcrt4");
+        test_exe.linkSystemLibrary("iphlpapi");
+    }
+    test_exe.linkLibrary(lib.build);
+    if (test_exe.target.getAbi() != .msvc)
+        test_exe.linkLibCpp()
+    else
+        test_exe.linkLibC();
     b.installArtifact(test_exe);
 
     const run_cmd = b.addRunArtifact(test_exe);
@@ -242,6 +261,7 @@ const cFlags: []const []const u8 = &.{
 };
 const cxxFlags = cFlags;
 const cxxSources: []const []const u8 = &.{
+    "src/ip_resolver.cpp",
     "src/address.cpp",
     "src/channel.cpp",
     "src/client.cpp",
@@ -266,7 +286,6 @@ const cxxSources: []const []const u8 = &.{
     "src/io_object.cpp",
     "src/io_thread.cpp",
     "src/ip.cpp",
-    "src/ip_resolver.cpp",
     "src/ipc_address.cpp",
     "src/ipc_connecter.cpp",
     "src/ipc_listener.cpp",
@@ -340,6 +359,18 @@ const cxxSources: []const []const u8 = &.{
     "src/v2_decoder.cpp",
     "src/v2_encoder.cpp",
     "src/v3_1_encoder.cpp",
+    "src/vmci.cpp",
+    "src/vmci_address.cpp",
+    "src/vmci_connecter.cpp",
+    "src/vmci_listener.cpp",
+    // "src/ws_address.cpp",
+    // "src/ws_connecter.cpp",
+    // "src/ws_decoder.cpp",
+    // "src/ws_encoder.cpp",
+    // "src/ws_engine.cpp",
+    // "src/ws_listener.cpp",
+    // "src/wss_address.cpp",
+    // "src/wss_engine.cpp",
     "src/xpub.cpp",
     "src/xsub.cpp",
     "src/zap_client.cpp",
@@ -348,6 +379,5 @@ const cxxSources: []const []const u8 = &.{
     "src/zmtp_engine.cpp",
 };
 const extraCsources: []const []const u8 = &.{
-    "src/tweetnacl.c",
     "external/sha1/sha1.c",
 };
